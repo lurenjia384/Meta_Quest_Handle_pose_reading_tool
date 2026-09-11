@@ -82,10 +82,9 @@ Press Ctrl+C to stop.
 ### Install commands (fresh machine reference)
 
 ```bash
-conda activate RoboTwin
 pip install mujoco numpy scipy
 
-# 2. Real-robot env (lerobot, python 3.11)
+# Real-robot env (lerobot, python 3.11)
 pip install "lerobot[so101]" placo numpy scipy
 ```
 
