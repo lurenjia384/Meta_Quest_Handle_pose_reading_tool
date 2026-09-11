@@ -85,7 +85,7 @@ python3 get_vr_pose.py
 ```bash
 pip install mujoco numpy scipy
 
-# 2. 真机环境（lerobot，python 3.11）
+真机环境（lerobot，python 3.11）
 pip install "lerobot[so101]" placo numpy scipy
 ```
 
