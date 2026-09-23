@@ -1,1 +1,7 @@
 .codegraph/
+
+# VR 采集数据不入库（数据量大，且会触发 GitHub 100MB 限制）
+# 例外：保留 flexiv_vr_004 作为示例数据集（格式参考）
+datasets/*
+!datasets/flexiv_vr_004/
+recordings/
