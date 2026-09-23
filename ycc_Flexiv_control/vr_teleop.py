@@ -89,7 +89,8 @@ def parse_transforms(data_string):
 
 def parse_buttons(text):
     parts = [p.strip() for p in text.split(",") if p.strip()]
-    result = {"A": False, "B": False, "RTr": False, "RG": False}
+    result = {"A": False, "B": False, "RTr": False, "RG": False,
+              "X": False, "Y": False, "LTr": False, "LG": False}
     for part in parts:
         fields = part.split()
         if not fields:
@@ -116,6 +117,7 @@ class VRPoseReader:
         self._running = False
         self._process = None
         self._thread = None
+        self.last_input_time = time.time()   # updated in read loop
 
     def start(self):
         result = subprocess.run(["adb", "devices"], capture_output=True, text=True)
@@ -159,6 +161,7 @@ class VRPoseReader:
                     if "r" in transforms:
                         self.right_pose = transforms["r"].copy()
                     self.buttons = btns
+                    self.last_input_time = time.time()
             except Exception:
                 pass
 

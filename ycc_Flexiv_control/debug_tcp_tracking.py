@@ -1,18 +1,3 @@
-#!/usr/bin/env python3
-"""
-Debug: does the Flexiv arm accurately track TCP targets?
-
-Streams a series of small TCP targets (within the safe 20cm envelope) and
-reads back the real TCP from states() each frame to measure:
-  - tracking error (target vs real)
-  - closed-loop latency (how many frames behind the arm is)
-  - smoothness (per-frame real velocity jitter)
-
-Usage (RoboTwin env):
-    conda activate RoboTwin
-    python debug_tcp_tracking.py [--duration 8] [--amplitude 0.05]
-"""
-
 import argparse
 import sys
 import time
@@ -61,7 +46,6 @@ def main():
     time.sleep(0.1)
     print("switched to NRT_CARTESIAN_MOTION_FORCE")
 
-    # sine trajectory around start position
     FPS = 50.0
     n = int(args.duration * FPS)
     targets = []
@@ -91,12 +75,9 @@ def main():
         err = np.linalg.norm(real[:3] - target[:3])
         max_err = max(max_err, err)
 
-        # velocity of real tcp
         v_real = np.linalg.norm(real[:3] - real_prev) / (dt + 1e-9)
         real_prev = real[:3]
 
-        # crude lag estimate: compare real position to target history
-        # (find which past target matches current real position best)
         if i >= 5:
             best_lag = 0
             best_d = 1e9
@@ -112,7 +93,6 @@ def main():
             print(f"  {i:4d}  {target[0]:.4f}  {real[0]:.4f}  {err*1000:5.1f}  "
                   f"{best_lag if i>=5 else 0:4d}  {v_real:7.3f}")
 
-        # maintain FPS
         elapsed = time.time() - loop_start - (i + 1) / FPS
         if elapsed < 0:
             time.sleep(-elapsed)

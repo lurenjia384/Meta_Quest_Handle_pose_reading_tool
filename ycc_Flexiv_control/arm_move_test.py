@@ -1,16 +1,3 @@
-#!/usr/bin/env python
-"""Flexiv Rizon4: rotate J7 by 30% of joint range + move TCP up 1 cm.
-
-Steps:
-  1. Connect (auto-discovery, do NOT pass network_interface_whitelist).
-  2. Read current state; compute J7 target = current + 30% of (q_max - q_min),
-     clipped to soft limits (5 deg margin).
-  3. NRT_JOINT_POSITION: move J7 (slow velocity/accel), wait until reached.
-  4. NRT_CARTESIAN_MOTION_FORCE: move TCP +Z by 0.01 m (world frame),
-     keeping orientation, wait until reached.
-  5. Return to the original posture (best effort) and stop.
-"""
-
 import argparse
 import math
 import sys
@@ -130,7 +117,6 @@ def main() -> int:
     print("[2/5] start q = {}".format(fmt(q0)), flush=True)
     print("      start tcp = {}".format(fmt(tcp0)), flush=True)
 
-    # ---- J7 rotation by fraction of range ----
     info = robot.info()
     q_min = np.asarray(info.q_min, dtype=np.float64).reshape(-1)
     q_max = np.asarray(info.q_max, dtype=np.float64).reshape(-1)
@@ -153,10 +139,6 @@ def main() -> int:
     ok = wait_joint(robot, target_q, tol_rad=0.005, timeout_s=args.timeout_s)
     print("  J7 move done, q = {}".format(fmt(read_q(robot))), flush=True)
 
-    # ---- TCP +Z by 1 cm (world frame, keep current orientation) ----
-    # IMPORTANT: base the target on the CURRENT TCP pose (after J7 rotated),
-    # not the pre-motion tcp0, otherwise the robot will also rotate back to
-    # the old orientation while translating (looks like an extra tilt).
     tcp_after_j7 = read_tcp(robot)
     target_pose = tcp_after_j7.copy()
     target_pose[2] += float(args.tcp_dz_m)
@@ -169,7 +151,6 @@ def main() -> int:
     success = ok and ok2
     print("  RESULT: {}".format("BOTH MOTIONS OK" if success else "PARTIAL / TIMEOUT"), flush=True)
 
-    # ---- return to start ----
     if not args.no_return:
         print("[5/5] returning to start posture...", flush=True)
         send_joint_target(robot, q0, args.max_vel, args.max_acc)

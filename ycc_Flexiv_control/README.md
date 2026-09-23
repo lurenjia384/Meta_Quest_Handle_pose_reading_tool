@@ -1,90 +1,159 @@
 # ycc_Flexiv_control
 
-Flexiv Rizon4 (SN: `Rizon4-062084`) + Robotiq 2F gripper 控制环境（基于 flexivrdk，无需 ROS）。
+Flexiv Rizon4 (SN: `Rizon4-062084`) + Robotiq 2F gripper control environment
+(based on `flexivrdk`, no ROS). Includes Quest VR teleoperation, high-frequency
+streaming control, and a dual-camera data recorder that outputs standard
+LeRobot v3.0 datasets.
 
-## 环境
+## Environment
 
-- Conda 环境：`RoboTwin`（Python 3.10）
-- flexivrdk: `1.9.0`（wheel 从 PyPI 下载，代理 `http://10.173.105.0:3129`）
-- 依赖：numpy 1.26.4、scipy、pycryptodome 3.23.0（均已装好）
+- flexivrdk: `1.9.0` 
+- Other dependencies: numpy 1.26.4, scipy, pycrypto dome 3.23.0, opencv python, matplotlib, and related packages for lerobot
 
-## 网络
 
-- 机械臂控制器：`192.168.2.100`（Flexiv User Port 1 默认静态地址）
-- 服务器网口：`eno2` = `192.168.2.2/24`（NetworkManager "有线连接 1"，manual，重启自动生效）
-- 之前 eno2 误配的 `192.168.100.1/24` 网段是错的（那是机器人 General Port / 旧笔记本网段）
+## Network
+
+- Robot controller: `192.168.2.100` (Flexiv User Port 1 default static)
+- PC NIC: `eno2` = `192.168.2.2/24` (NetworkManager "有线连接 1", manual)
 
 ```bash
-# 验证网络
 ping 192.168.2.100
 ```
 
-## 快速测试
+## Quick checks
 
 ```bash
-conda activate RoboTwin
-cd /home/robot/data_18T/ycc/VR/ycc_Flexiv_control
 
-# 只读状态 + 极小关节运动（默认 0.001 rad ≈ 0.03% of ±π）+ 复位
-python test_arm.py --sn Rizon4-062084
+cd VR/ycc_Flexiv_control
+
+python test_arm.py --sn Rizon4-062084          # read state + tiny joint move + return
+python gripper_test.py --device /dev/ttyACM0    # 1 open/close cycle
+python arm_move_test.py --sn Rizon4-062084      # J7 rotate + TCP move test
 ```
 
-`test_arm.py` 参数：
-- `--dq-rad 0.001`：关节1运动量（rad）
-- `--max-vel 0.02` / `--max-acc 0.05`：速度/加速度限制（很低）
-- `--no-return`：运动后不回到起始姿态
-- 急停未释放时脚本会安全退出（返回码 3）
+## VR teleoperation (`vr_teleop.py`)
 
-## 夹爪开合测试
-
-Robotiq 2F（USB Modbus RTU，`/dev/ttyACM0`，device_id=9，baudrate=115200）：
+High-frequency streaming Cartesian control from the Quest controllers.
 
 ```bash
-conda activate RoboTwin
-python gripper_test.py --device /dev/ttyACM0          # 1 次开合
-python gripper_test.py --device /dev/ttyACM0 --cycles 3
+
+python vr_teleop.py --scale 0.3 --max-speed 0.8 --no-rot-scale --gripper \
+    --visualize --log teleop_session.csv
 ```
 
-参数：`--open-speed 48 --close-speed 96 --force 100 --timeout-s 15`。
-脚本会激活（若未激活）→ 闭合 → 张开，每步打印 gACT/gOBJ/gPO 状态。
+Controls:
+- Hold right **B** : teleop active (clutch). Handle displacement/rotation maps
+  to TCP displacement from the B-press reference (absolute mapping).
+- Right trigger **RTr** : close gripper (release opens).
+- Left **X** / **Y** : reserved for data recording (see recorder below).
+- Ctrl+C : quit and return to start posture.
 
-## 机械臂运动测试（J7 旋转 + TCP 位移）
+Options:
+- `--scale` : hand→TCP position scale (default 0.3)
+- `--max-speed` : max TCP linear speed m/s (default 0.8)
+- `--no-rot-scale` : 1:1 rotation mapping
+- `--rot-speed` : max rotation speed rad/s (default 0.5)
+- `--accel-mm` : per-frame position acceleration limit mm (default 1.0)
+- `--handle-smooth` : handle EMA smoothing 0..1 (default 0.5)
+- `--gripper` : control the Robotiq gripper
+- `--visualize` : live 3D window (controllers + TCP)
+- `--log FILE` : per-frame CSV log (handle / real state / action)
+
+Control architecture (per the Flexiv_Rizon4_Quest2_VR optimization doc):
+- **Absolute clutch mapping**: on B press record `vr_ref` + `tcp_ref`; target =
+  `tcp_ref + axis_matrix @ (vr_now - vr_ref) * scale`. Rotation via relative
+  rotation matrix (world-frame conjugation), not per-axis Euler.
+- **Reference governor**: velocity/acceleration-limited, fixed 100 Hz internal
+  period; the arm is never asked to sprint after raw VR jumps.
+- **High-frequency streaming**: servo loop always sends a target every tick at
+  `FPS` (default 100 Hz), independent of VR data freshness; stale VR decelerates
+  smoothly via the governor.
+- Feed-forward velocity from the governor `v_cmd` is passed to
+  `SendCartesianMotionForce` (velocity + max_linear_vel/acc).
+
+`vr_teleop_bak.py` is a backup of the earlier clamp-based version.
+
+## Data recording (`record_lerobot_dataset.py`)
+
+Records dual color cameras + Flexiv TCP state/action while teleoperating.
+Writes RAW files (PNG + CSV) — run in the RoboTwin env.
 
 ```bash
-conda activate RoboTwin
-python arm_move_test.py --sn Rizon4-062084
+
+python record_lerobot_dataset.py --scale 0.3 --max-speed 0.8 --no-rot-scale \
+    --gripper --session-dir ./recordings/session1
 ```
 
-默认：J7 旋转 `30%` 关节范围（J7 限位 ±2.967 rad，30% ≈ 1.78 rad），TCP 沿世界 Z 上移 `1cm`（0.01 m），完成后自动复位。
-参数：`--j7-frac 0.30 --tcp-dz-m 0.01 --max-vel 0.10 --max-acc 0.20 --cart-vel 0.02 --cart-acc 0.05 --no-return`。
-限位来自 `robot.info().q_min/q_max`，带 5° 安全边距。
+Controls:
+- Hold **B** : teleop (same as vr_teleop)
+- **X** (left) : START recording an episode
+- **Y** (left) : STOP and close the episode
+- Ctrl+C : quit (saves the open episode)
 
-> 注意：TCP 位移目标基于 **J7 旋转后的实际 TCP 位姿**（只改 z，保持当前朝向）。如果基于运动前的旧姿态，机械臂会同时把朝向转回去，产生倾斜的复合运动，看起来像"下移/乱动"。
+Cameras (two independent RealSense color streams):
+- **D435** color → `/dev/video4` (device index 4)
+- **D435i** color → `/dev/video10` (device index 10)
+- Both at 640×480; two cameras share USB bandwidth → record FPS 15.
+  `dual_camera.py` uses explicit `CAP_V4L2` (the default backend can attach to
+  a depth/metadata node and return no frames).
 
-## VR 手柄遥操作
+State / action (8-dim each):
+- `x, y, z` TCP position (m), `qw, qx, qy, qz` TCP quaternion, `gripper`
+- state = real TCP + gripper; action = commanded target + gripper
+
+Output layout per episode:
+```
+recordings/session1/
+├── episode_0/
+│   ├── data.csv              # timestamp, frame, s_*, a_*
+│   └── images/
+│       ├── top_00000.png     # D435 color
+│       └── front_00000.png   # D435i color
+├── episode_1/ ...
+```
+
+## Convert to LeRobot v3.0 (`convert_to_lerobot.py`)
+
+Builds a standard LeRobot dataset (codebase v3.0) with videos/ MP4 files.
 
 ```bash
-conda activate RoboTwin
-python vr_teleop.py --sn Rizon4-062084                    # 实机
-python vr_teleop.py --dry-run                             # 只打印目标，不连机器人
-python vr_teleop.py --axis-matrix-file config/quest_axis_matrix.json   # 加载标定矩阵
+conda activate lerobot
+python convert_to_lerobot.py --session-dir ./recordings/session1 \
+    --dataset-root ./datasets --dataset-name flexiv_vr_001 \
+    --task pick_and_place
 ```
 
-操作：
-- 按住右手柄 **B**：TCP 跟随手柄位移/旋转（deadman，松开立即停）
-- 右扳机 **RTr**：夹爪闭合（松开张开）
-- Ctrl+C：退出并回到起始位姿
+Dataset layout (standard v3.0):
+```
+datasets/flexiv_vr_001/
+├── data/chunk-000/file-000.parquet      # scalar state/action/timestamps
+├── videos/observation.image.top/*.mp4   # SVT-AV1 encoded
+├── videos/observation.image.front/*.mp4
+└── meta/ (info.json, episodes, tasks, stats)
+```
 
-安全（默认保守）：
-- 位移缩放 `0.30`（30cm 手柄 = 9cm TCP），旋转缩放 `0.30`
-- 最大速度 `0.05 m/s`，单帧最大步长 `0.5mm`，旋转 `0.004 rad/帧`
-- 输入超时 `0.15s`（数据卡住立即停）
-- 工作空间硬边界 `WS_MIN/WS_MAX`
-- 依赖 `gripper_modbus.py`（Robotiq 驱动）和 Quest teleop APK（adb logcat TAG `wE9ryARX`）
+Notes:
+- `info.json` shows `codebase_version: "v3.0"` and `robot_type: flexiv_rizon4`.
+- Image features must use `dtype="video"` so frames are stored as MP4 (the
+  standard v3.0 layout); `dtype="image"` stores bytes inside parquet instead.
+- Feature shapes must be passed as tuples (lerobot 0.4.4 validates
+  np.shape(tuple) != list and would reject a list).
+- `--dataset-name` dir must not already exist.
+- Requires `ffmpeg` with `libsvtav1` (present on this machine).
 
-## 注意事项
+## Debug / test tools
 
-- 运动前确认急停已释放（`robot.estop_released()`）
-- flexivrdk 连接时**不要传** `network_interface_whitelist`（会触发 "All whitelist interfaces were filtered out" bug，不加即可自动发现）
-- API 注意：1.9 版本用 `SendJointPosition(q, zero_vel, max_vel, max_acc)`（不是 SetJointPositions），`robot.mode()` 是方法不是属性
-- 参考实现：`/home/robot/data_18T/ycc/flexiv-vr-control/`（别人的完整遥操作仓库，含 Robotiq Modbus 桥接、ROS bag 记录）
+```bash
+python debug_tcp_tracking.py --duration 8 --amplitude 0.04   # TCP tracking lag
+python sim_vr_teleop_test.py --pattern smooth                # synthetic VR sim
+python vr_visualize.py                                       # live controller 3D view
+```
+
+## Notes
+
+- Verify e-stop released before motion (`robot.estop_released()`).
+- flexivrdk 1.9 API: `SendJointPosition(q, zero_vel, max_vel, max_acc)`,
+  `robot.mode()` is a method (not a property).
+- Quest teleop APK must be running (adb logcat TAG `wE9ryARX`).
+- Reference implementation: `/home/robot/data_18T/ycc/flexiv-vr-control/`
+- **Reset: python reset.py --robot-sn Rizon4-062084**
